@@ -1,7 +1,7 @@
 {
   "uuid": "talk2pc-focused-window@talk2pc.github.io",
   "name": "Talk2PC Focused Window Bridge",
-  "description": "Derived from the original wdotool GNOME Shell bridge by cushycush. Talk2PC helps users control desktop apps, and this extension provides the focused window identity and frame geometry it needs over the session bus, with no background activity.",
+  "description": "Derived from the original wdotool GNOME Shell bridge by cushycush. Talk2PC helps users control desktop apps. This extension exposes focused window identity, pointer position, frame geometry, and optional global shortcut grabs over the session bus when the XDG GlobalShortcuts portal is unavailable. No background activity beyond the D-Bus service.",
   "url": "https://github.com/panjianghao/-talk2pc-focused-window-extension",
-  "shell-version": ["45", "46", "47", "48"]
+  "shell-version": ["45", "46", "47", "48", "49"]
 }
