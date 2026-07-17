@@ -1,11 +1,13 @@
-// Talk2PC Focused Window Bridge
+// Talk2PC Focused Window Bridge — GNOME Shell 45–50 (ES modules)
 //
 // Derived from the original wdotool GNOME Shell bridge by cushycush.
 // This reduced variant keeps only the focused-window lookup, pointer
 // position, and geometry query needed by the Flutter plugin. GNOME Shell
 // has no generic external window geometry API, so a tiny companion
-// extension remains the
-// least-coupled path.
+// extension remains the least-coupled path.
+//
+// D-Bus interface matches the 43–44 legacy package exactly so clients can
+// use one probe path for the whole 43–50 range.
 
 import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
