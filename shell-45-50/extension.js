@@ -1,24 +1,29 @@
 // Talk2PC Focused Window Bridge — GNOME Shell 45–50 (ES modules)
 //
 // Derived from the original wdotool GNOME Shell bridge by cushycush.
-// This reduced variant keeps only the focused-window lookup, pointer
-// position, and geometry query needed by the Flutter plugin. GNOME Shell
-// has no generic external window geometry API, so a tiny companion
-// extension remains the least-coupled path.
+// Provides focused-window geometry plus virtual-keyboard injection so
+// Talk2PC can paste/type on GNOME 43–50 without the RemoteDesktop portal.
 //
 // D-Bus interface matches the 43–44 legacy package exactly so clients can
 // use one probe path for the whole 43–50 range.
 
+import Clutter from 'gi://Clutter';
+import Gdk from 'gi://Gdk';
 import Gio from 'gi://Gio';
 import Shell from 'gi://Shell';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const BUS_NAME = 'org.gnome.Shell.Extensions.Talk2PCFocusedWindow';
 const OBJECT_PATH = '/org/gnome/Shell/Extensions/Talk2PCFocusedWindow';
+/** Bump when D-Bus surface changes. 2 = geometry + PressKey. */
+const API_VERSION = 2;
 
 const IFACE_XML = `
 <node>
   <interface name="org.gnome.Shell.Extensions.Talk2PCFocusedWindow">
+    <method name="GetApiVersion">
+      <arg type="u" direction="out" name="version"/>
+    </method>
     <method name="GetActiveWindow">
       <arg type="s" direction="out" name="json"/>
     </method>
@@ -34,8 +39,44 @@ const IFACE_XML = `
       <arg type="i" direction="out" name="width"/>
       <arg type="i" direction="out" name="height"/>
     </method>
+    <method name="PressKey">
+      <arg type="s" direction="in" name="keysym"/>
+      <arg type="s" direction="in" name="direction"/>
+      <arg type="b" direction="out" name="ok"/>
+    </method>
   </interface>
 </node>`;
+
+const KEY_ALIASES = {
+    ctrl: 'Control_L',
+    control: 'Control_L',
+    control_l: 'Control_L',
+    control_r: 'Control_R',
+    alt: 'Alt_L',
+    meta: 'Alt_L',
+    alt_l: 'Alt_L',
+    alt_r: 'Alt_R',
+    shift: 'Shift_L',
+    shift_l: 'Shift_L',
+    shift_r: 'Shift_R',
+    super: 'Super_L',
+    win: 'Super_L',
+    logo: 'Super_L',
+    super_l: 'Super_L',
+    super_r: 'Super_R',
+    enter: 'Return',
+    return: 'Return',
+    esc: 'Escape',
+    escape: 'Escape',
+    space: 'space',
+    backspace: 'BackSpace',
+    delete: 'Delete',
+    del: 'Delete',
+    tab: 'Tab',
+    insert: 'Insert',
+    pageup: 'Page_Up',
+    pagedown: 'Page_Down',
+};
 
 function windowId(w) {
     return String(w.get_stable_sequence());
@@ -56,9 +97,51 @@ function findById(id) {
     for (const w of global.get_window_actors().map((a) => a.meta_window)) {
         if (!w || w.is_override_redirect())
             continue;
-        if (windowId(w) === id) return w;
+        if (windowId(w) === id)
+            return w;
     }
     return null;
+}
+
+function resolveKeyval(keysym) {
+    if (!keysym)
+        return 0;
+    const raw = String(keysym).trim();
+    if (!raw)
+        return 0;
+
+    const lower = raw.toLowerCase();
+    const canonical = KEY_ALIASES[lower] || raw;
+
+    let keyval = Gdk.keyval_from_name(canonical);
+    if (keyval)
+        return keyval;
+
+    if (canonical.length === 1) {
+        keyval = Gdk.keyval_from_name(canonical);
+        if (keyval)
+            return keyval;
+        return Gdk.unicode_to_keyval(canonical.charCodeAt(0));
+    }
+
+    // Last try: title-case X11 names already correct (Return, Insert, …).
+    return Gdk.keyval_from_name(canonical) || 0;
+}
+
+function eventTime() {
+    // Prefer a real event timestamp when present; otherwise CURRENT_TIME (0).
+    try {
+        const t = Clutter.get_current_event_time();
+        if (t)
+            return t;
+    } catch (_e) {
+        // ignore
+    }
+    try {
+        return global.get_current_time();
+    } catch (_e) {
+        return 0;
+    }
 }
 
 export default class WdotoolExtension extends Extension {
@@ -73,6 +156,7 @@ export default class WdotoolExtension extends Extension {
             null,
             null
         );
+        this._virtualKeyboard = null;
     }
 
     disable() {
@@ -84,20 +168,63 @@ export default class WdotoolExtension extends Extension {
             Gio.bus_unown_name(this._busOwnerId);
             this._busOwnerId = 0;
         }
+        this._virtualKeyboard = null;
+    }
+
+    _keyboard() {
+        if (!this._virtualKeyboard) {
+            const seat = Clutter.get_default_backend().get_default_seat();
+            this._virtualKeyboard = seat.create_virtual_device(
+                Clutter.InputDeviceType.KEYBOARD_DEVICE
+            );
+        }
+        return this._virtualKeyboard;
+    }
+
+    GetApiVersion() {
+        return API_VERSION;
     }
 
     GetActiveWindow() {
         const w = global.display.focus_window;
         return w ? JSON.stringify(windowJson(w)) : 'null';
     }
+
     GetPointerPosition() {
         const [x, y] = global.get_pointer();
         return [x | 0, y | 0];
     }
+
     GetWindowGeometry(id) {
         const w = findById(id);
-        if (!w) return [false, 0, 0, 0, 0];
+        if (!w)
+            return [false, 0, 0, 0, 0];
         const r = w.get_frame_rect();
         return [true, r.x | 0, r.y | 0, r.width | 0, r.height | 0];
+    }
+
+    /**
+     * Inject a key via Clutter virtual keyboard.
+     * @param {string} keysym X11-style keysym (Control_L, v, Return, …)
+     * @param {string} direction "press" | "release" | "click" (default click)
+     */
+    PressKey(keysym, direction) {
+        const keyval = resolveKeyval(keysym);
+        if (!keyval)
+            return false;
+
+        const dir = String(direction || 'click').toLowerCase();
+        const kb = this._keyboard();
+        const time = eventTime();
+
+        try {
+            if (dir === 'press' || dir === 'click' || dir === 'pressrelease')
+                kb.notify_keyval(time, keyval, Clutter.KeyState.PRESSED);
+            if (dir === 'release' || dir === 'click' || dir === 'pressrelease')
+                kb.notify_keyval(time, keyval, Clutter.KeyState.RELEASED);
+            return true;
+        } catch (_e) {
+            return false;
+        }
     }
 }

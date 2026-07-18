@@ -1,18 +1,26 @@
 # Talk2PC Focused Window Bridge
 
-Minimal GNOME Shell extension for Talk2PC (and wdotool geometry).
+GNOME Shell extension for Talk2PC (and wdotool).
 
 Supports **GNOME Shell 43–50**.
 
 ## Purpose
 
-Expose focused window identity, pointer position, and frame geometry over the
-session bus so Talk2PC can place its desktop overlay on GNOME Wayland.
+Expose over the session bus:
+
+1. **Geometry** — focused window identity, pointer position, and frame rect so
+   Talk2PC can place its desktop overlay on GNOME Wayland.
+2. **Key inject (API ≥ 2)** — Clutter virtual-keyboard `PressKey` so Talk2PC can
+   send paste chords (`Ctrl+V` / `Ctrl+Shift+V`) and remote key events **without**
+   the XDG RemoteDesktop portal on Shell 43–50.
 
 **Global shortcuts are not handled by this extension.** On GNOME:
 
 - GNOME 48+ uses the XDG GlobalShortcuts portal
 - Older GNOME uses system custom keybindings (`gsettings`) registered by the app
+
+On **Shell 51+**, Talk2PC prefers RemoteDesktop/libei for input; this extension
+remains useful for geometry when installed.
 
 ## Two packages (same UUID)
 
@@ -33,9 +41,12 @@ both zips; the site serves the matching one per Shell version.
 - Service: `org.gnome.Shell.Extensions.Talk2PCFocusedWindow`
 - Object path: `/org/gnome/Shell/Extensions/Talk2PCFocusedWindow`
 - Methods:
+  - `GetApiVersion` → `u` (currently **2**)
   - `GetActiveWindow` → JSON string
   - `GetPointerPosition` → (x, y)
   - `GetWindowGeometry(id)` → (found, x, y, width, height)
+  - `PressKey(keysym, direction)` → bool  
+    `direction`: `press` | `release` | `click` (press+release)
 
 ## Install
 
