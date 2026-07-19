@@ -7,7 +7,7 @@
 // Geometry + virtual-keyboard injection (API version 2). Derived from the
 // original wdotool GNOME Shell bridge by cushycush.
 
-const { Gio, Shell, Clutter, Gdk } = imports.gi;
+const { Gio, Shell, Clutter } = imports.gi;
 
 const BUS_NAME = 'org.gnome.Shell.Extensions.Talk2PCFocusedWindow';
 const OBJECT_PATH = '/org/gnome/Shell/Extensions/Talk2PCFocusedWindow';
@@ -99,6 +99,28 @@ function findById(id) {
     return null;
 }
 
+/**
+ * Resolve X11-style keysym names to keyvals without Gdk/Gtk/Adw.
+ * EGO-I-002 forbids GTK libraries in shell-process extension files.
+ * Clutter.KEY_* constants match the same keyval namespace as Gdk.
+ */
+function keyvalFromName(name) {
+    if (!name)
+        return 0;
+    const prop = `KEY_${name}`;
+    if (!(prop in Clutter))
+        return 0;
+    const keyval = Clutter[prop];
+    return typeof keyval === 'number' && keyval ? keyval : 0;
+}
+
+/** Minimal Gdk.unicode_to_keyval-compatible mapping for BMP code points. */
+function unicodeToKeyval(code) {
+    if (code < 0x100)
+        return code;
+    return 0x01000000 | code;
+}
+
 function resolveKeyval(keysym) {
     if (!keysym)
         return 0;
@@ -109,18 +131,21 @@ function resolveKeyval(keysym) {
     const lower = raw.toLowerCase();
     const canonical = KEY_ALIASES[lower] || raw;
 
-    let keyval = Gdk.keyval_from_name(canonical);
+    let keyval = keyvalFromName(canonical);
     if (keyval)
         return keyval;
 
-    if (canonical.length === 1) {
-        keyval = Gdk.keyval_from_name(canonical);
+    if (canonical.length === 1)
+        return unicodeToKeyval(canonical.charCodeAt(0));
+
+    // F-keys often arrive as "f1" / "F1".
+    if (/^f\d{1,2}$/i.test(canonical)) {
+        keyval = keyvalFromName(canonical.toUpperCase());
         if (keyval)
             return keyval;
-        return Gdk.unicode_to_keyval(canonical.charCodeAt(0));
     }
 
-    return Gdk.keyval_from_name(canonical) || 0;
+    return 0;
 }
 
 function eventTime() {
