@@ -148,21 +148,6 @@ function resolveKeyval(keysym) {
     return 0;
 }
 
-function eventTime() {
-    try {
-        const t = Clutter.get_current_event_time();
-        if (t)
-            return t;
-    } catch (_e) {
-        // ignore
-    }
-    try {
-        return global.get_current_time();
-    } catch (_e) {
-        return 0;
-    }
-}
-
 class Extension {
     enable() {
         this._impl = Gio.DBusExportedObject.wrapJSObject(IFACE_XML, this);
@@ -229,7 +214,7 @@ class Extension {
 
         const dir = String(direction || 'click').toLowerCase();
         const kb = this._keyboard();
-        const time = eventTime();
+        const time = global.get_current_time();
 
         try {
             if (dir === 'press' || dir === 'click' || dir === 'pressrelease')
