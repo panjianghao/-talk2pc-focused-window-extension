@@ -13,6 +13,13 @@ Expose over the session bus:
 2. **Key inject (API ≥ 2)** — Clutter virtual-keyboard `PressKey` so Talk2PC can
    send paste chords (`Ctrl+V` / `Ctrl+Shift+V`) and remote key events **without**
    the XDG RemoteDesktop portal on Shell 43–50.
+3. **Pointer inject (API ≥ 3)** — Clutter virtual pointer `MovePointerRelative` /
+   `MovePointerAbsolute` / `MouseButton` / `MouseScroll` so Talk2PC can move the
+   cursor, click and scroll **without** the XDG RemoteDesktop portal or
+   `/dev/uinput` on Shell 43–50.
+4. **Screen capture (API ≥ 4)** — `ScreenshotArea(x, y, width, height, path)`
+   grabs the exact stage rect through `Shell.Screenshot`, so the canvas `shot`
+   flow needs no portal and no permission prompt.
 
 **Global shortcuts are not handled by this extension.** On GNOME:
 
@@ -41,12 +48,23 @@ both zips; the site serves the matching one per Shell version.
 - Service: `org.gnome.Shell.Extensions.Talk2PCFocusedWindow`
 - Object path: `/org/gnome/Shell/Extensions/Talk2PCFocusedWindow`
 - Methods:
-  - `GetApiVersion` → `u` (currently **2**)
+  - `GetApiVersion` → `u` (currently **4**)
   - `GetActiveWindow` → JSON string
   - `GetPointerPosition` → (x, y)
   - `GetWindowGeometry(id)` → (found, x, y, width, height)
   - `PressKey(keysym, direction)` → bool  
     `direction`: `press` | `release` | `click` (press+release)
+  - `MovePointerRelative(dx, dy)` → bool
+  - `MovePointerAbsolute(x, y)` → bool
+  - `MouseButton(button, direction)` → bool  
+    `button`: xdotool index (`1` left, `2` middle, `3` right, `8`/`9` back/forward);
+    `direction`: `press` | `release` | `click`
+  - `MouseScroll(dx, dy)` → bool  
+    Deltas accumulate; `40` units = one wheel notch, positive `dy` scrolls down,
+    positive `dx` scrolls right (same convention as the X11 path).
+  - `ScreenshotArea(x, y, width, height, path)` → bool  
+    Captures a stage/logical rect to `path` through `Shell.Screenshot`; HiDPI
+    scaling is handled by Mutter.
 
 ## Install
 

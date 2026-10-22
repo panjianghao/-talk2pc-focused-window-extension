@@ -1,7 +1,14 @@
 {
   "uuid": "talk2pc-focused-window@talk2pc.github.io",
   "name": "Talk2PC Focused Window Bridge",
-  "description": "Derived from the original wdotool GNOME Shell bridge by cushycush. Talk2PC helps users control desktop apps. This extension provides focused window identity, pointer position, frame geometry, and virtual-keyboard key injection over the session bus (no RemoteDesktop portal on Shell 45–50). Supports GNOME Shell 45–50 (ES modules).",
+  "description": "Derived from the original wdotool GNOME Shell bridge by cushycush. Talk2PC helps users control desktop apps. This extension provides focused window identity, pointer position, frame geometry, virtual-keyboard key injection, and virtual-pointer motion/buttons/scroll over the session bus (no RemoteDesktop portal on Shell 45–50). Supports GNOME Shell 45–50 (ES modules).",
   "url": "https://github.com/panjianghao/-talk2pc-focused-window-extension",
-  "shell-version": ["45", "46", "47", "48", "49", "50"]
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ]
 }
