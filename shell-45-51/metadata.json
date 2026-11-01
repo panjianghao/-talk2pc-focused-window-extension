@@ -1,0 +1,15 @@
+{
+  "uuid": "talk2pc-focused-window@talk2pc.github.io",
+  "name": "Talk2PC Focused Window Bridge",
+  "description": "Derived from the original wdotool GNOME Shell bridge by cushycush. Talk2PC helps users control their own desktop from another personal device. Over the session bus, without using the RemoteDesktop portal, this extension provides focused window identity, pointer position, frame geometry, virtual-keyboard key injection, virtual-pointer motion/buttons/scroll, area screenshots written to a caller-provided file path, and an optional presentation-pointer overlay. Intended for the Talk2PC app running in the same user session; it listens only on the session bus and opens no network ports. Supports GNOME Shell 45–51 (ES modules).",
+  "url": "https://github.com/panjianghao/-talk2pc-focused-window-extension",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50",
+    "51"
+  ]
+}
