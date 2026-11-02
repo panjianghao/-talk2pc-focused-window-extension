@@ -20,7 +20,7 @@ Expose over the session bus:
 4. **Screen capture (API ≥ 4)** — `ScreenshotArea(x, y, width, height, path)`
    grabs the exact stage rect through `Shell.Screenshot`, so the canvas `shot`
    flow needs no portal and no permission prompt.
-5. **Presentation pointer (API 7)** — `SetPresentationPointer` draws a large
+5. **Presentation pointer (API ≥ 7)** — `SetPresentationPointer` draws a large
    cursor or spotlight highlight as a non-reactive Shell actor, so it never
    blocks clicks.
 
@@ -48,7 +48,7 @@ both zips; the site serves the matching one per Shell version.
 - Service: `org.gnome.Shell.Extensions.Talk2PCFocusedWindow`
 - Object path: `/org/gnome/Shell/Extensions/Talk2PCFocusedWindow`
 - Methods:
-  - `GetApiVersion` → `u` (currently **7**)
+  - `GetApiVersion` → `u` (currently **8**)
   - `GetActiveWindow` → JSON string
   - `GetPointerPosition` → (x, y)
   - `GetWindowGeometry(id)` → (found, x, y, width, height)

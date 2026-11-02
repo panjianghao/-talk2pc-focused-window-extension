@@ -16,12 +16,12 @@ const BUS_NAME = 'org.gnome.Shell.Extensions.Talk2PCFocusedWindow';
 const OBJECT_PATH = '/org/gnome/Shell/Extensions/Talk2PCFocusedWindow';
 /**
  * Bump when the D-Bus surface changes.
- * 7 = geometry + PressKey + pointer + ScreenshotArea + presentation pointer.
+ * 8 = geometry + PressKey + pointer + ScreenshotArea + presentation pointer.
  */
-const API_VERSION = 7;
+const API_VERSION = 8;
 /** Pointer poll interval in milliseconds. */
 const POINTER_POLL_INTERVAL_MS = 16;
-/** Client scroll deltas: 40 units == one wheel notch (same as X11 path). */
+/** Client scroll deltas: 40 units == one wheel notch. */
 const SCROLL_UNITS_PER_NOTCH = 40;
 /** Notches emitted per MouseScroll call. */
 const MAX_NOTCHES_PER_CALL = 8;
@@ -31,8 +31,8 @@ const POINTER_MAX_SIZE = 4096;
 const MAX_MOUSE_BUTTON = 12;
 /** Screenshot timeout in milliseconds. */
 const SCREENSHOT_TIMEOUT_MS = 3000;
-/** Screenshot area cap in pixels, after clamping to the stage. */
-const MAX_SCREENSHOT_PIXELS = 64 * 1024 * 1024;
+/** Screenshot area cap in stage pixels; also bounds the captured surface. */
+const MAX_SCREENSHOT_PIXELS = 16 * 1024 * 1024;
 /** Maximum length of a SetPresentationPointer JSON payload. */
 const POINTER_JSON_MAX = 8192;
 
@@ -90,10 +90,9 @@ const IFACE_XML = `
       <arg type="s" direction="in" name="filename"/>
       <arg type="b" direction="out" name="ok"/>
     </method>
-    <!-- Presentation pointer: the extension draws it inside the Shell so the
-         overlay never takes part in pointer picking (no click-through needed,
-         no XWayland input-region dependency). The JSON string carries the
-         appearance only; the Shell reads the pointer position itself. -->
+    <!-- Presentation pointer: the extension draws it inside the Shell. The
+         JSON string carries the appearance only; the Shell reads the pointer
+         position itself. -->
     <method name="SetPresentationPointer">
       <arg type="s" direction="in" name="json"/>
       <arg type="b" direction="out" name="ok"/>
@@ -456,9 +455,16 @@ class Talk2PCExtension {
         this._pointerLastY = -1;
         LOGGED_FAILURES.clear();
         this._pointerTickId = 0;
+        // Abort hooks for captures still waiting on the compositor.
+        this._pendingCaptures = new Set();
     }
 
     disable() {
+        // Close out in-flight captures while the D-Bus object can still reply.
+        const aborts = this._pendingCaptures ? [...this._pendingCaptures] : [];
+        this._pendingCaptures = new Set();
+        for (const abort of aborts)
+            abort();
         if (this._impl) {
             this._impl.unexport();
             this._impl = null;
@@ -492,7 +498,7 @@ class Talk2PCExtension {
         return this._virtualPointer;
     }
 
-    /** Clutter backend and default seat. */
+    /** The Shell's seat, which owns the pointer and keyboard. */
     _seat() {
         return Clutter.get_default_backend().get_default_seat();
     }
@@ -524,25 +530,60 @@ class Talk2PCExtension {
      *
      * Coordinates are stage (logical) coordinates, the same space as
      * GetPointerPosition and GetWindowGeometry. HiDPI captures come out at
-     * native pixels.
-     *
-     * The capture is asynchronous, so the reply waits on a nested main loop
-     * and the caller sees `true` only after the file is complete. A timeout
-     * bounds the wait.
+     * native pixels. The reply is sent from the capture callback, so the
+     * Shell's own iteration keeps running; the caller sees `true` only after
+     * the PNG is renamed into place. A timeout bounds the wait.
      */
-    ScreenshotArea(x, y, width, height, filename) {
+    ScreenshotAreaAsync(params, invocation) {
+        // Answer exactly once no matter what; _captureArea() owns the
+        // success path.
+        let replied = false;
+        const reply = (ok) => {
+            if (replied)
+                return;
+            replied = true;
+            try {
+                invocation.return_value(new GLib.Variant('(b)', [ok]));
+            } catch (e) {
+                logError(e, 'Talk2PC: ScreenshotArea could not send its reply');
+            }
+        };
+        try {
+            this._captureArea(params, reply);
+        } catch (e) {
+            logError(e, 'Talk2PC: ScreenshotArea failed');
+            reply(false);
+        }
+    }
+
+    /**
+     * Start the area capture and report through `reply`.
+     * @param {Array} params the five D-Bus arguments
+     * @param {function(boolean)} reply called exactly once
+     */
+    _captureArea(params, reply) {
+        const [x, y, width, height, filename] = params;
         const areaX = Math.round(Number(x)) || 0;
         const areaY = Math.round(Number(y)) || 0;
         const areaWidth = Math.round(Number(width)) || 0;
         const areaHeight = Math.round(Number(height)) || 0;
         const path = String(filename || '');
         if (areaWidth <= 0 || areaHeight <= 0 || !path)
-            return false;
-        // The compositor allocates a surface of this size; keep it bounded.
-        const grabWidth = Math.min(areaWidth, global.stage.width);
-        const grabHeight = Math.min(areaHeight, global.stage.height);
+            return reply(false);
+
+        // The capture surface matches the request, so clamp the request that
+        // is passed to screenshot_area() itself.
+        const stageWidth = Math.floor(global.stage.width);
+        const stageHeight = Math.floor(global.stage.height);
+        const grabX = Math.max(0, Math.min(areaX, Math.max(0, stageWidth - 1)));
+        const grabY = Math.max(0, Math.min(areaY, Math.max(0, stageHeight - 1)));
+        // Never ask for more than what is left of the stage from that origin.
+        const grabWidth = Math.min(areaWidth, stageWidth - grabX);
+        const grabHeight = Math.min(areaHeight, stageHeight - grabY);
+        if (grabWidth <= 0 || grabHeight <= 0)
+            return reply(false);
         if (grabWidth * grabHeight > MAX_SCREENSHOT_PIXELS)
-            return false;
+            return reply(false);
 
         // Capture into a temporary file next to the target, then rename it
         // over the target, so a failed capture cannot damage an existing file.
@@ -559,90 +600,115 @@ class Talk2PCExtension {
         } catch (e) {
             logFailureOnce('screenshot-open', e,
                 'Talk2PC: ScreenshotArea could not open a temporary file');
-            return false;
+            return reply(false);
         }
 
-        const loop = new GLib.MainLoop(null, false);
-        // Set once the reply is decided; the capture callback must not touch
-        // the stream or the result after that point.
+        // Set once the invocation has an answer; the capture callback must not
+        // touch the stream or the file after that point.
         let settled = false;
-        let ok = false;
-        let timedOut = false;
-        const watchdog = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
-            SCREENSHOT_TIMEOUT_MS, () => {
-                timedOut = true;
-                settled = true;
-                loop.quit();
-                return GLib.SOURCE_REMOVE;
-            });
+        let watchdog = 0;
+
+        /** The target was never touched; drop the temporary file. */
+        const removeTmp = () => {
+            try {
+                tmp.delete(null);
+            } catch (_e) {
+                // Nothing to clean up.
+            }
+        };
+
+        /** Answer the caller exactly once and stop the watchdog. */
+        let abort = null;
+        const finish = (ok) => {
+            if (settled)
+                return;
+            settled = true;
+            if (abort)
+                this._pendingCaptures.delete(abort);
+            if (watchdog) {
+                GLib.source_remove(watchdog);
+                watchdog = 0;
+            }
+            reply(ok);
+        };
+
+        // Lets disable() answer a capture that is still in flight.
+        abort = () => {
+            removeTmp();
+            finish(false);
+        };
+        this._pendingCaptures.add(abort);
 
         try {
             const shooter = new Shell.Screenshot();
+            // Registered before the capture starts so a synchronous callback
+            // still finds a source to remove.
+            watchdog = GLib.timeout_add(GLib.PRIORITY_DEFAULT,
+                SCREENSHOT_TIMEOUT_MS, () => {
+                    // The source is spent; clear the id so finish() does not
+                    // remove it again.
+                    watchdog = 0;
+                    // The compositor may still be writing, so drop the
+                    // temporary file instead of renaming it.
+                    removeTmp();
+                    finish(false);
+                    return GLib.SOURCE_REMOVE;
+                });
             shooter.screenshot_area(
-                areaX,
-                areaY,
-                areaWidth,
-                areaHeight,
+                grabX,
+                grabY,
+                grabWidth,
+                grabHeight,
                 stream,
                 (source, result) => {
-                    // Consume the GIO result even on timeout, so GLib does not
-                    // log an unhandled async result.
+                    // Consume the GIO result even after a timeout, so GLib
+                    // does not log an unhandled async result.
+                    let ok = false;
                     try {
                         source.screenshot_area_finish(result);
-                        if (!settled)
-                            ok = true;
+                        ok = !settled;
                     } catch (e) {
                         if (!settled)
                             logError(e, 'Talk2PC: screenshot_area failed');
-                    } finally {
-                        if (!settled) {
-                            settled = true;
-                            loop.quit();
+                    }
+                    // The caller was already answered (timeout or disable); the
+                    // writer still owns the stream, so leave it alone.
+                    if (settled)
+                        return;
+
+                    try {
+                        stream.close(null);
+                    } catch (_e) {
+                        // Already closed or failed.
+                    }
+
+                    // Rename only once the bytes are on disk, so a successful
+                    // reply always means a complete file.
+                    if (ok) {
+                        try {
+                            tmp.move(target, Gio.FileCopyFlags.OVERWRITE,
+                                null, null);
+                        } catch (e) {
+                            logFailureOnce('screenshot-rename', e,
+                                'Talk2PC: ScreenshotArea could not replace the target file');
+                            ok = false;
                         }
                     }
+                    if (!ok)
+                        removeTmp();
+                    finish(ok);
                 }
             );
-            // A synchronous callback would already have quit the loop.
-            if (!settled)
-                loop.run();
         } catch (e) {
             logError(e, 'Talk2PC: screenshot_area failed');
-        } finally {
-            if (!timedOut)
-                GLib.source_remove(watchdog);
-            // After a timeout the compositor may still be writing the PNG,
-            // so the stream is left open.
-            if (!timedOut) {
-                try {
-                    stream.close(null);
-                } catch (_e) {
-                    // Already closed or failed.
-                }
-            }
-        }
-
-        if (!ok) {
-            // The target was never touched; remove the temporary file.
             try {
-                tmp.delete(null);
+                stream.close(null);
             } catch (_e) {
-                // Nothing to clean up.
+                // Already closed or failed.
             }
-            return false;
+            removeTmp();
+            finish(false);
         }
-        try {
-            tmp.move(target, Gio.FileCopyFlags.OVERWRITE, null, null);
-        } catch (e) {
-            logFailureOnce('screenshot-rename', e,
-                'Talk2PC: ScreenshotArea could not replace the target file');
-            try {
-                tmp.delete(null);
-            } catch (_e) {
-                // Nothing to clean up.
-            }
-            return false;
-        }
-        return true;
     }
 
     /**
@@ -750,8 +816,8 @@ class Talk2PCExtension {
 
     /**
      * Inject scroll wheel notches. Deltas accumulate across calls: 40 units
-     * are one notch, matching the X11 fallback's convention. Only notches
-     * that were emitted are consumed, so a failed call can be retried.
+     * are one notch. Only notches that were emitted are consumed, so a
+     * failed call can be retried.
      * @param {number} dx positive scrolls right
      * @param {number} dy positive scrolls down
      */
@@ -806,8 +872,7 @@ class Talk2PCExtension {
     // ---- presentation pointer overlay -------------------------------------
     //
     // The overlay is a non-reactive St actor, so clicks always reach the
-    // window underneath. Its position is read from the compositor on every
-    // tick, so the marker cannot drift.
+    // window underneath. Its position follows the compositor pointer.
 
     /**
      * Show or update the overlay.
