@@ -1,8 +1,38 @@
 # Talk2PC Focused Window Bridge
 
-GNOME Shell extension for Talk2PC (and wdotool).
+Your laptop microphone sounds bad, the system input method covers too few
+languages, and typing is slow. Talk2PC routes input through your phone instead:
+dictate, handwrite, or enter special characters on the phone, and the text is
+written straight into the focused window. Phone microphones are usually better
+and phone keyboards cover more languages and characters, so voice input,
+handwriting, and write-as-you-translate work the way you are used to.
 
-Supports **GNOME Shell 43–51**.
+The phone also works as a wireless mouse and keyboard — tilt or swipe to move
+the pointer while standing or walking. Send files to the computer, and keep the
+clipboard in sync in both directions.
+
+For teachers: photograph student work with the phone, then zoom, annotate and
+explain it on the projector while controlling the slides. The presentation
+pointer and spotlight overlay are drawn directly by this extension.
+
+> ### Get the Talk2PC desktop app
+>
+> **[Download at talk2pc.lycheenow.com](https://talk2pc.lycheenow.com)**
+>
+> Install the app first. The extension has no visible interface on its own.
+
+This extension is the GNOME Shell bridge for Talk2PC, not a standalone
+application — installing it alone produces no visible interface. After you
+install and run the Talk2PC desktop app from
+[talk2pc.lycheenow.com](https://talk2pc.lycheenow.com), the interface and all
+features are provided by the desktop and phone apps. The extension itself only
+exposes interfaces on the session bus for focused-window identity, pointer
+position, virtual keyboard and pointer injection, and area screenshots. It
+opens no network ports and collects no telemetry.
+
+---
+
+GNOME Shell extension for Talk2PC (and wdotool) — supports **GNOME Shell 43–51**.
 
 ## Purpose
 
